@@ -1,3 +1,24 @@
+# Jedis N3TWORK Fork
+
+This fork is used for building and releasing jedis into our private Nexus repository. It contains changes necessary to 
+support automatic key prefixing which have not yet been merged into jedis's main branch (https://github.com/redis/jedis/pull/3781). 
+It also contains the configuration changes for deploying into our Nexus repository.
+
+These are the commands for deploying:
+
+```
+mvn versions:set -DnewVersion=<new version>
+mvn versions:commit
+mvn clean deploy -Dmaven.test.skip=true
+mvn versions:set -DnewVersion=<new snapshot version>
+mvn versions:commit
+git commit -m "Set version to <new snapshot version>"
+git push
+```
+
+Tests are skipped since there are no code changes on this fork (and the tests have been verified in the base branch via a Github Action), 
+and they are a PITA to setup and run.
+
 # Jedis
 
 [![Release](https://img.shields.io/github/release/redis/jedis.svg?sort=semver)](https://github.com/redis/jedis/releases/latest)

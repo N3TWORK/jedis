@@ -9,7 +9,7 @@
 	<packaging>jar</packaging>
 	<groupId>redis.clients</groupId>
 	<artifactId>jedis</artifactId>
-	<version>5.2.0-SNAPSHOT</version>
+	<version>5.2.0.N3T.0-SNAPSHOT</version>
 	<name>Jedis</name>
 	<description>Jedis is a blazingly small and sane Redis java client.</description>
 	<url>https://github.com/redis/jedis</url>
@@ -38,9 +38,9 @@
 	</issueManagement>
 
 	<scm>
-		<connection>scm:git:git@github.com:redis/jedis.git</connection>
-		<url>scm:git:git@github.com:redis/jedis.git</url>
-		<developerConnection>scm:git:git@github.com:redis/jedis.git</developerConnection>
+		<connection>scm:git:git@github.com:N3TWORK/jedis.git</connection>
+		<url>scm:git:git@github.com:N3TWORK/jedis.git</url>
+		<developerConnection>scm:git:git@github.com:N3TWORK/jedis.git</developerConnection>
 		<tag>jedis-3.4.1</tag>
 	</scm>
 
@@ -157,12 +157,12 @@
 
 	<distributionManagement>
 		<snapshotRepository>
-			<id>ossrh</id>
-			<url>https://oss.sonatype.org/content/repositories/snapshots</url>
+			<id>snapshot.maven.n3twork.com</id>
+			<url>https://nexus.n3twork.com/repository/maven-snapshots/</url>
 		</snapshotRepository>
 		<repository>
-			<id>ossrh</id>
-			<url>https://oss.sonatype.org/service/local/staging/deploy/maven2/</url>
+			<id>release.maven.n3twork.com</id>
+			<url>https://nexus.n3twork.com/repository/maven-releases/</url>
 		</repository>
 	</distributionManagement>
 
@@ -250,17 +250,6 @@
 			<plugin>
 				<artifactId>maven-release-plugin</artifactId>
 				<version>3.0.1</version>
-			</plugin>
-			<plugin>
-				<groupId>org.sonatype.plugins</groupId>
-				<artifactId>nexus-staging-maven-plugin</artifactId>
-				<version>1.6.13</version>
-				<extensions>true</extensions>
-				<configuration>
-					<serverId>ossrh</serverId>
-					<nexusUrl>https://oss.sonatype.org/</nexusUrl>
-					<autoReleaseAfterClose>true</autoReleaseAfterClose>
-				</configuration>
 			</plugin>
 			<plugin>
 				<groupId>com.googlecode.maven-java-formatter-plugin</groupId>
