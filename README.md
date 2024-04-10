@@ -12,6 +12,7 @@ mvn versions:commit
 mvn clean deploy -Dmaven.test.skip=true
 mvn versions:set -DnewVersion=<new snapshot version>
 mvn versions:commit
+git add pom.xml
 git commit -m "Set version to <new snapshot version>"
 git push
 ```
