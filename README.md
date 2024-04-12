@@ -1,7 +1,8 @@
 # Jedis N3TWORK Fork
 
 This fork is used for building and releasing jedis into our private Nexus repository. It contains changes necessary to 
-support automatic key prefixing which have not yet been merged into jedis's main branch (https://github.com/redis/jedis/pull/3781). 
+support automatic key prefixing which have not yet been merged into jedis's main branch (https://github.com/redis/jedis/pull/3781), as well
+as performance-related changes that we need now.
 It also contains the configuration changes for deploying into our Nexus repository.
 
 These are the commands for deploying:
