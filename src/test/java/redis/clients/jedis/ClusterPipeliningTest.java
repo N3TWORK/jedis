@@ -1,6 +1,8 @@
 package redis.clients.jedis;
 
 import static org.junit.Assert.*;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.*;
 import static redis.clients.jedis.Protocol.CLUSTER_HASHSLOTS;
 
 import java.util.*;
@@ -14,7 +16,10 @@ import org.junit.BeforeClass;
 import org.junit.Test;
 
 import redis.clients.jedis.args.*;
+import redis.clients.jedis.exceptions.JedisAskDataException;
+import redis.clients.jedis.exceptions.JedisClusterOperationException;
 import redis.clients.jedis.exceptions.JedisDataException;
+import redis.clients.jedis.exceptions.JedisMovedDataException;
 import redis.clients.jedis.params.*;
 import redis.clients.jedis.providers.ClusterConnectionProvider;
 import redis.clients.jedis.resps.GeoRadiusResponse;
@@ -1080,6 +1085,37 @@ public class ClusterPipeliningTest {
         assertThreadsCount();
       }
     }
+  }
+
+  @Test
+  public void clusterPipelineHandlesMovedDataException() {
+    ClusterConnectionProvider provider = spy(new ClusterConnectionProvider(nodes, DEFAULT_CLIENT_CONFIG));
+    Connection connectionThatThrowsMovedData = mock(Connection.class);
+    doThrow(new JedisMovedDataException("test", new HostAndPort("", 0), 0))
+            .doCallRealMethod()
+            .when(connectionThatThrowsMovedData)
+            .getOne();
+    doReturn(connectionThatThrowsMovedData).when(provider).getConnection(any(HostAndPort.class));
+    ClusterPipeline p = new ClusterPipeline(provider);
+    p.set("foo", "bar");
+    p.sync();
+    verify(provider).renewSlotCache(any(Connection.class));
+  }
+
+  @Test
+  public void clusterPipelineHandlesAskException() {
+    ClusterConnectionProvider provider = spy(new ClusterConnectionProvider(nodes, DEFAULT_CLIENT_CONFIG));
+    Connection connectionThatThrowsAskException = mock(Connection.class);
+    doThrow(new JedisAskDataException("test", new HostAndPort("redirectedHost", 0), 0))
+            .doCallRealMethod()
+            .when(connectionThatThrowsAskException)
+            .getOne();
+    Connection conectionToRedirectedTargetNode = mock(Connection.class);
+    doReturn(connectionThatThrowsAskException).doReturn(conectionToRedirectedTargetNode).when(provider).getConnection(any(HostAndPort.class));
+    ClusterPipeline p = new ClusterPipeline(provider);
+    p.set("foo", "bar");
+    p.sync();
+    verify(conectionToRedirectedTargetNode).sendCommand(eq(Protocol.Command.ASKING));
   }
 
   private static void assertThreadsCount() {

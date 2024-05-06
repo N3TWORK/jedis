@@ -3,6 +3,10 @@ package redis.clients.jedis;
 import java.util.List;
 import java.util.regex.Pattern;
 import org.apache.commons.pool2.impl.GenericObjectPoolConfig;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import redis.clients.jedis.exceptions.JedisConnectionException;
+import redis.clients.jedis.exceptions.JedisException;
 import redis.clients.jedis.providers.ShardedConnectionProvider;
 import redis.clients.jedis.util.Hashing;
 import redis.clients.jedis.util.IOUtils;
@@ -14,6 +18,7 @@ import redis.clients.jedis.util.IOUtils;
  */
 @Deprecated
 public class ShardedPipeline extends MultiNodePipelineBase {
+  private static final Logger LOG = LoggerFactory.getLogger(JedisSentinelPool.class);
 
   private final ShardedConnectionProvider provider;
   private AutoCloseable closeable = null;
@@ -56,6 +61,20 @@ public class ShardedPipeline extends MultiNodePipelineBase {
   @Override
   protected Connection getConnection(HostAndPort nodeKey) {
     return provider.getConnection(nodeKey);
+  }
+
+  @Override
+  protected void handleExceptionOnSync(MultiNodePipelineCommand pipelineCommand,
+                                          Connection connection,
+                                          JedisException exception) {
+    if (!(exception instanceof JedisConnectionException)) {
+      throw exception;
+    }
+
+    LOG.error("Error with connection to " + connection, exception);
+    // cleanup the connection
+    connections.remove(pipelineCommand.getNodeKey());
+    IOUtils.closeQuietly(connection);
   }
 
   /**

@@ -1,31 +1,29 @@
 package redis.clients.jedis;
 
-import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.LinkedList;
-import java.util.List;
 import java.util.Map;
 import java.util.Queue;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import redis.clients.jedis.exceptions.JedisConnectionException;
+import redis.clients.jedis.exceptions.JedisDataException;
+import redis.clients.jedis.exceptions.JedisException;
 import redis.clients.jedis.graph.GraphCommandObjects;
 import redis.clients.jedis.providers.ConnectionProvider;
 import redis.clients.jedis.util.IOUtils;
 
 public abstract class MultiNodePipelineBase extends PipelineBase {
-
   private final Logger log = LoggerFactory.getLogger(getClass());
 
-  private final Map<HostAndPort, Queue<Response<?>>> pipelinedResponses;
-  private final Map<HostAndPort, Connection> connections;
+  protected final Queue<MultiNodePipelineCommand> pipelinedCommands;
+  protected final Map<HostAndPort, Connection> connections;
   private volatile boolean syncing = false;
 
   public MultiNodePipelineBase(CommandObjects commandObjects) {
     super(commandObjects);
-    pipelinedResponses = new LinkedHashMap<>();
+    pipelinedCommands = new LinkedList<>();
     connections = new LinkedHashMap<>();
   }
 
@@ -46,28 +44,10 @@ public abstract class MultiNodePipelineBase extends PipelineBase {
   @Override
   protected final <T> Response<T> appendCommand(CommandObject<T> commandObject) {
     HostAndPort nodeKey = getNodeKey(commandObject.getArguments());
-
-    Queue<Response<?>> queue;
-    Connection connection;
-    if (pipelinedResponses.containsKey(nodeKey)) {
-      queue = pipelinedResponses.get(nodeKey);
-      connection = connections.get(nodeKey);
-    } else {
-      Connection newOne = getConnection(nodeKey);
-      connections.putIfAbsent(nodeKey, newOne);
-      connection = connections.get(nodeKey);
-      if (connection != newOne) {
-        log.debug("Duplicate connection to {}, closing it.", nodeKey);
-        IOUtils.closeQuietly(newOne);
-      }
-
-      pipelinedResponses.putIfAbsent(nodeKey, new LinkedList<>());
-      queue = pipelinedResponses.get(nodeKey);
-    }
-
-    connection.sendCommand(commandObject.getArguments());
     Response<T> response = new Response<>(commandObject.getBuilder());
-    queue.add(response);
+    pipelinedCommands.add(new MultiNodePipelineCommand(commandObject, response, nodeKey, 0));
+    Connection connection = connections.computeIfAbsent(nodeKey, this::getConnection);
+    connection.sendCommand(commandObject.getArguments());
     return response;
   }
 
@@ -87,29 +67,35 @@ public abstract class MultiNodePipelineBase extends PipelineBase {
     }
     syncing = true;
 
-    Iterator<Map.Entry<HostAndPort, Queue<Response<?>>>> pipelinedResponsesIterator
-        = pipelinedResponses.entrySet().iterator();
-    while (pipelinedResponsesIterator.hasNext()) {
-      Map.Entry<HostAndPort, Queue<Response<?>>> entry = pipelinedResponsesIterator.next();
-      HostAndPort nodeKey = entry.getKey();
-      Queue<Response<?>> queue = entry.getValue();
-      Connection connection = connections.get(nodeKey);
-      try {
-        List<Object> unformatted = connection.getMany(queue.size());
-        for (Object o : unformatted) {
-            queue.poll().set(o);
+    while (!pipelinedCommands.isEmpty()) {
+      MultiNodePipelineCommand pipelineCommand = pipelinedCommands.poll();
+      Connection connection = connections.get(pipelineCommand.getNodeKey());
+
+      if (connection == null) {
+        log.warn("Dropping pipeline command due to dropped connection to: {}", pipelineCommand.getNodeKey());
+      } else {
+        try {
+          pipelineCommand.getResponse().set(connection.getOne());
+        } catch (JedisException exception) {
+          if (exception instanceof JedisDataException) {
+            pipelineCommand.getResponse().set(exception);
+          }
+
+          handleExceptionOnSync(
+                  pipelineCommand,
+                  connection,
+                  exception
+          );
         }
-      } catch (JedisConnectionException jce) {
-        log.error("Error with connection to " + nodeKey, jce);
-        // cleanup the connection
-        pipelinedResponsesIterator.remove();
-        connections.remove(nodeKey);
-        IOUtils.closeQuietly(connection);
       }
     }
 
     syncing = false;
   }
+
+  protected abstract void handleExceptionOnSync(MultiNodePipelineCommand pipelineCommand,
+                                                   Connection connection,
+                                                   JedisException exception);
 
   @Deprecated
   public Response<Long> waitReplicas(int replicas, long timeout) {

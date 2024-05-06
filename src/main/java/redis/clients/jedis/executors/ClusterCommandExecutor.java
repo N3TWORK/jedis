@@ -203,4 +203,12 @@ public class ClusterCommandExecutor implements CommandExecutor {
       throw new JedisClusterOperationException(e);
     }
   }
+
+  public int getMaxAttempts() {
+    return maxAttempts;
+  }
+
+  public Duration getMaxTotalRetriesDuration() {
+    return maxTotalRetriesDuration;
+  }
 }
