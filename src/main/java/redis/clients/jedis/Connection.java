@@ -5,12 +5,14 @@ import static redis.clients.jedis.util.SafeEncoder.encode;
 import java.io.Closeable;
 import java.io.IOException;
 import java.net.Socket;
+import java.net.SocketAddress;
 import java.net.SocketException;
 import java.nio.ByteBuffer;
 import java.nio.CharBuffer;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
 import java.util.function.Supplier;
 
 import redis.clients.jedis.Protocol.Command;
@@ -19,7 +21,6 @@ import redis.clients.jedis.annots.Experimental;
 import redis.clients.jedis.args.ClientAttributeOption;
 import redis.clients.jedis.args.Rawable;
 import redis.clients.jedis.commands.ProtocolCommand;
-import redis.clients.jedis.csc.ClientSideCache;
 import redis.clients.jedis.exceptions.JedisConnectionException;
 import redis.clients.jedis.exceptions.JedisDataException;
 import redis.clients.jedis.exceptions.JedisException;
@@ -31,15 +32,18 @@ import redis.clients.jedis.util.RedisOutputStream;
 public class Connection implements Closeable {
 
   private ConnectionPool memberOf;
-  private RedisProtocol protocol;
+  protected RedisProtocol protocol;
   private final JedisSocketFactory socketFactory;
   private Socket socket;
   private RedisOutputStream outputStream;
   private RedisInputStream inputStream;
-  private ClientSideCache clientSideCache;
   private int soTimeout = 0;
   private int infiniteSoTimeout = 0;
   private boolean broken = false;
+  private boolean strValActive;
+  private String strVal;
+  protected String server;
+  protected String version;
 
   public Connection() {
     this(Protocol.DEFAULT_HOST, Protocol.DEFAULT_PORT);
@@ -68,19 +72,37 @@ public class Connection implements Closeable {
     initializeFromClientConfig(clientConfig);
   }
 
-  @Experimental
-  public Connection(final JedisSocketFactory socketFactory, JedisClientConfig clientConfig,
-      ClientSideCache clientSideCache) {
-    this.socketFactory = socketFactory;
-    this.soTimeout = clientConfig.getSocketTimeoutMillis();
-    this.infiniteSoTimeout = clientConfig.getBlockingSocketTimeoutMillis();
-    initializeFromClientConfig(clientConfig);
-    initializeClientSideCache(clientSideCache);
-  }
-
   @Override
   public String toString() {
-    return "Connection{" + socketFactory + "}";
+    return getClass().getSimpleName() + "{" + socketFactory + "}";
+  }
+
+  @Experimental
+  public String toIdentityString() {
+    if (strValActive == broken && strVal != null) {
+      return strVal;
+    }
+
+    String className = getClass().getSimpleName();
+    int id = hashCode();
+
+    if (socket == null) {
+      return String.format("%s{id: 0x%X}", className, id);
+    }
+
+    SocketAddress remoteAddr = socket.getRemoteSocketAddress();
+    SocketAddress localAddr = socket.getLocalSocketAddress();
+    if (remoteAddr != null) {
+      strVal = String.format("%s{id: 0x%X, L:%s %c R:%s}", className, id,
+          localAddr, (broken ? '!' : '-'), remoteAddr);
+    } else if (localAddr != null) {
+      strVal = String.format("%s{id: 0x%X, L:%s}", className, id, localAddr);
+    } else {
+      strVal = String.format("%s{id: 0x%X}", className, id);
+    }
+
+    strValActive = broken;
+    return strVal;
   }
 
   public final RedisProtocol getRedisProtocol() {
@@ -105,7 +127,7 @@ public class Connection implements Closeable {
       try {
         this.socket.setSoTimeout(soTimeout);
       } catch (SocketException ex) {
-        broken = true;
+        setBroken();
         throw new JedisConnectionException(ex);
       }
     }
@@ -118,7 +140,7 @@ public class Connection implements Closeable {
       }
       socket.setSoTimeout(infiniteSoTimeout);
     } catch (SocketException ex) {
-      broken = true;
+      setBroken();
       throw new JedisConnectionException(ex);
     }
   }
@@ -127,7 +149,7 @@ public class Connection implements Closeable {
     try {
       socket.setSoTimeout(this.soTimeout);
     } catch (SocketException ex) {
-      broken = true;
+      setBroken();
       throw new JedisConnectionException(ex);
     }
   }
@@ -194,7 +216,7 @@ public class Connection implements Closeable {
          */
       }
       // Any other exceptions related to connection?
-      broken = true;
+      setBroken();
       throw ex;
     }
   }
@@ -347,20 +369,47 @@ public class Connection implements Closeable {
     try {
       outputStream.flush();
     } catch (IOException ex) {
-      broken = true;
+      setBroken();
       throw new JedisConnectionException(ex);
     }
   }
 
+  @Experimental
+  protected Object protocolRead(RedisInputStream is) {
+    return Protocol.read(is);
+  }
+
+  @Experimental
+  protected void protocolReadPushes(RedisInputStream is) {
+  }
+
   protected Object readProtocolWithCheckingBroken() {
     if (broken) {
-      throw new JedisConnectionException("Attempting to read from a broken connection");
+      throw new JedisConnectionException("Attempting to read from a broken connection.");
     }
 
     try {
-      return Protocol.read(inputStream, clientSideCache);
+      return protocolRead(inputStream);
     } catch (JedisConnectionException exc) {
       broken = true;
+      throw exc;
+    }
+  }
+
+  protected void readPushesWithCheckingBroken() {
+    if (broken) {
+      throw new JedisConnectionException("Attempting to read from a broken connection.");
+    }
+
+    try {
+      if (inputStream.available() > 0) {
+        protocolReadPushes(inputStream);
+      }
+    } catch (IOException e) {
+      broken = true;
+      throw new JedisConnectionException("Failed to check buffer on connection.", e);
+    } catch (JedisConnectionException exc) {
+      setBroken();
       throw exc;
     }
   }
@@ -380,6 +429,7 @@ public class Connection implements Closeable {
 
   /**
    * Check if the client name libname, libver, characters are legal
+   *
    * @param info the name
    * @return Returns true if legal, false throws exception
    * @throws JedisException if characters illegal
@@ -395,7 +445,7 @@ public class Connection implements Closeable {
     return true;
   }
 
-  private void initializeFromClientConfig(final JedisClientConfig config) {
+  protected void initializeFromClientConfig(final JedisClientConfig config) {
     try {
       connect();
 
@@ -406,12 +456,12 @@ public class Connection implements Closeable {
         final RedisCredentialsProvider redisCredentialsProvider = (RedisCredentialsProvider) credentialsProvider;
         try {
           redisCredentialsProvider.prepare();
-          helloOrAuth(protocol, redisCredentialsProvider.get());
+          helloAndAuth(protocol, redisCredentialsProvider.get());
         } finally {
           redisCredentialsProvider.cleanUp();
         }
       } else {
-        helloOrAuth(protocol, credentialsProvider != null ? credentialsProvider.get()
+        helloAndAuth(protocol, credentialsProvider != null ? credentialsProvider.get()
             : new DefaultRedisCredentials(config.getUser(), config.getPassword()));
       }
 
@@ -423,7 +473,9 @@ public class Connection implements Closeable {
       }
 
       ClientSetInfoConfig setInfoConfig = config.getClientSetInfoConfig();
-      if (setInfoConfig == null) setInfoConfig = ClientSetInfoConfig.DEFAULT;
+      if (setInfoConfig == null) {
+        setInfoConfig = ClientSetInfoConfig.DEFAULT;
+      }
 
       if (!setInfoConfig.isDisabled()) {
         String libName = JedisMetaInfo.getArtifactId();
@@ -441,6 +493,11 @@ public class Connection implements Closeable {
           fireAndForgetMsg.add(new CommandArguments(Command.CLIENT).add(Keyword.SETINFO)
               .add(ClientAttributeOption.LIB_VER.getRaw()).add(libVersion));
         }
+      }
+
+      // set READONLY flag to ALL connections (including master nodes) when enable read from replica
+      if (config.isReadOnlyForRedisClusterReplicas()) {
+        fireAndForgetMsg.add(new CommandArguments(Command.READONLY));
       }
 
       for (CommandArguments arg : fireAndForgetMsg) {
@@ -463,50 +520,56 @@ public class Connection implements Closeable {
     }
   }
 
-  private void helloOrAuth(final RedisProtocol protocol, final RedisCredentials credentials) {
-
-    if (credentials == null || credentials.getPassword() == null) {
-      if (protocol != null) {
-        sendCommand(Command.HELLO, encode(protocol.version()));
-        getOne();
+  private void helloAndAuth(final RedisProtocol protocol, final RedisCredentials credentials) {
+    Map<String, Object> helloResult = null;
+    if (protocol != null && credentials != null && credentials.getUser() != null) {
+      byte[] rawPass = encodeToBytes(credentials.getPassword());
+      try {
+        helloResult = hello(encode(protocol.version()), Keyword.AUTH.getRaw(), encode(credentials.getUser()), rawPass);
+      } finally {
+        Arrays.fill(rawPass, (byte) 0); // clear sensitive data
       }
-      return;
+    } else {
+      auth(credentials);
+      helloResult = protocol == null ? null : hello(encode(protocol.version()));
     }
-
-    // Source: https://stackoverflow.com/a/9670279/4021802
-    ByteBuffer passBuf = Protocol.CHARSET.encode(CharBuffer.wrap(credentials.getPassword()));
-    byte[] rawPass = Arrays.copyOfRange(passBuf.array(), passBuf.position(), passBuf.limit());
-    Arrays.fill(passBuf.array(), (byte) 0); // clear sensitive data
-
-    try {
-      /// actual HELLO or AUTH -->
-      if (protocol != null) {
-        if (credentials.getUser() != null) {
-          sendCommand(Command.HELLO, encode(protocol.version()),
-              Keyword.AUTH.getRaw(), encode(credentials.getUser()), rawPass);
-          getOne(); // Map
-        } else {
-          sendCommand(Command.AUTH, rawPass);
-          getStatusCodeReply(); // OK
-          sendCommand(Command.HELLO, encode(protocol.version()));
-          getOne(); // Map
-        }
-      } else { // protocol == null
-        if (credentials.getUser() != null) {
-          sendCommand(Command.AUTH, encode(credentials.getUser()), rawPass);
-        } else {
-          sendCommand(Command.AUTH, rawPass);
-        }
-        getStatusCodeReply(); // OK
-      }
-      /// <-- actual HELLO or AUTH
-    } finally {
-
-      Arrays.fill(rawPass, (byte) 0); // clear sensitive data
+    if (helloResult != null) {
+      server = (String) helloResult.get("server");
+      version = (String) helloResult.get("version");
     }
 
     // clearing 'char[] credentials.getPassword()' should be
     // handled in RedisCredentialsProvider.cleanUp()
+  }
+
+  private void auth(RedisCredentials credentials) {
+    if (credentials == null || credentials.getPassword() == null) {
+      return;
+    }
+    byte[] rawPass = encodeToBytes(credentials.getPassword());
+    try {
+      if (credentials.getUser() == null) {
+        sendCommand(Command.AUTH, rawPass);
+      } else {
+        sendCommand(Command.AUTH, encode(credentials.getUser()), rawPass);
+      }
+    } finally {
+      Arrays.fill(rawPass, (byte) 0); // clear sensitive data
+    }
+    getStatusCodeReply();
+  }
+
+  protected Map<String, Object> hello(byte[]... args) {
+    sendCommand(Command.HELLO, args);
+    return BuilderFactory.ENCODED_OBJECT_MAP.build(getOne());
+  }
+
+  protected byte[] encodeToBytes(char[] chars) {
+    // Source: https://stackoverflow.com/a/9670279/4021802
+    ByteBuffer passBuf = Protocol.CHARSET.encode(CharBuffer.wrap(chars));
+    byte[] rawPass = Arrays.copyOfRange(passBuf.array(), passBuf.position(), passBuf.limit());
+    Arrays.fill(passBuf.array(), (byte) 0); // clear sensitive data
+    return rawPass;
   }
 
   public String select(final int index) {
@@ -521,20 +584,5 @@ public class Connection implements Closeable {
       throw new JedisException(status);
     }
     return true;
-  }
-
-  private void initializeClientSideCache(ClientSideCache csCache) {
-    this.clientSideCache = csCache;
-    if (clientSideCache != null) {
-      if (protocol != RedisProtocol.RESP3) {
-        throw new JedisException("Client side caching is only supported with RESP3.");
-      }
-
-      sendCommand(Protocol.Command.CLIENT, "TRACKING", "ON");
-      String reply = getStatusCodeReply();
-      if (!"OK".equals(reply)) {
-        throw new JedisException("Could not enable client tracking. Reply: " + reply);
-      }
-    }
   }
 }

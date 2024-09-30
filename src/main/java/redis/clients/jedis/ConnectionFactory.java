@@ -5,8 +5,10 @@ import org.apache.commons.pool2.PooledObjectFactory;
 import org.apache.commons.pool2.impl.DefaultPooledObject;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
 import redis.clients.jedis.annots.Experimental;
-import redis.clients.jedis.csc.ClientSideCache;
+import redis.clients.jedis.csc.Cache;
+import redis.clients.jedis.csc.CacheConnection;
 import redis.clients.jedis.exceptions.JedisException;
 
 /**
@@ -18,7 +20,7 @@ public class ConnectionFactory implements PooledObjectFactory<Connection> {
 
   private final JedisSocketFactory jedisSocketFactory;
   private final JedisClientConfig clientConfig;
-  private ClientSideCache clientSideCache = null;
+  private Cache clientSideCache = null;
 
   public ConnectionFactory(final HostAndPort hostAndPort) {
     this.clientConfig = DefaultJedisClientConfig.builder().build();
@@ -31,7 +33,7 @@ public class ConnectionFactory implements PooledObjectFactory<Connection> {
   }
 
   @Experimental
-  public ConnectionFactory(final HostAndPort hostAndPort, final JedisClientConfig clientConfig, ClientSideCache csCache) {
+  public ConnectionFactory(final HostAndPort hostAndPort, final JedisClientConfig clientConfig, Cache csCache) {
     this.clientConfig = clientConfig;
     this.jedisSocketFactory = new DefaultJedisSocketFactory(hostAndPort, this.clientConfig);
     this.clientSideCache = csCache;
@@ -62,7 +64,8 @@ public class ConnectionFactory implements PooledObjectFactory<Connection> {
   @Override
   public PooledObject<Connection> makeObject() throws Exception {
     try {
-      Connection jedis = new Connection(jedisSocketFactory, clientConfig, clientSideCache);
+      Connection jedis = clientSideCache == null ? new Connection(jedisSocketFactory, clientConfig)
+          : new CacheConnection(jedisSocketFactory, clientConfig, clientSideCache);
       return new DefaultPooledObject<>(jedis);
     } catch (JedisException je) {
       logger.debug("Error while makeObject", je);

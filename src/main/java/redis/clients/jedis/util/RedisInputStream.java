@@ -14,6 +14,7 @@ import java.io.FilterInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.math.BigInteger;
+
 import redis.clients.jedis.annots.Experimental;
 import redis.clients.jedis.exceptions.JedisConnectionException;
 
@@ -91,7 +92,7 @@ public class RedisInputStream extends FilterInputStream {
     }
 
     final String reply = sb.toString();
-    if (reply.length() == 0) {
+    if (reply.isEmpty()) {
       throw new JedisConnectionException("It seems like server has closed the connection.");
     }
 
@@ -183,9 +184,12 @@ public class RedisInputStream extends FilterInputStream {
 
     ensureCrLf();
     switch (b) {
-      case 't': return true;
-      case 'f': return false;
-      default: throw new JedisConnectionException("Unexpected character!");
+      case 't':
+        return true;
+      case 'f':
+        return false;
+      default:
+        throw new JedisConnectionException("Unexpected character!");
     }
   }
 
@@ -259,4 +263,12 @@ public class RedisInputStream extends FilterInputStream {
       }
     }
   }
+
+  @Override
+  public int available() throws IOException {
+    int availableInBuf = limit - count;
+    int availableInSocket = this.in.available();
+    return (availableInBuf > availableInSocket) ? availableInBuf : availableInSocket;
+  }
+
 }

@@ -6,6 +6,8 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ThreadLocalRandom;
+
 import org.apache.commons.pool2.impl.GenericObjectPoolConfig;
 
 import redis.clients.jedis.ClusterCommandArguments;
@@ -16,7 +18,7 @@ import redis.clients.jedis.Connection;
 import redis.clients.jedis.ConnectionPool;
 import redis.clients.jedis.JedisClusterInfoCache;
 import redis.clients.jedis.annots.Experimental;
-import redis.clients.jedis.csc.ClientSideCache;
+import redis.clients.jedis.csc.Cache;
 import redis.clients.jedis.exceptions.JedisClusterOperationException;
 import redis.clients.jedis.exceptions.JedisException;
 
@@ -32,7 +34,7 @@ public class ClusterConnectionProvider implements ConnectionProvider {
   }
 
   @Experimental
-  public ClusterConnectionProvider(Set<HostAndPort> clusterNodes, JedisClientConfig clientConfig, ClientSideCache clientSideCache) {
+  public ClusterConnectionProvider(Set<HostAndPort> clusterNodes, JedisClientConfig clientConfig, Cache clientSideCache) {
     this.cache = new JedisClusterInfoCache(clientConfig, clientSideCache, clusterNodes);
     initializeSlotsCache(clusterNodes, clientConfig);
   }
@@ -44,7 +46,7 @@ public class ClusterConnectionProvider implements ConnectionProvider {
   }
 
   @Experimental
-  public ClusterConnectionProvider(Set<HostAndPort> clusterNodes, JedisClientConfig clientConfig, ClientSideCache clientSideCache,
+  public ClusterConnectionProvider(Set<HostAndPort> clusterNodes, JedisClientConfig clientConfig, Cache clientSideCache,
       GenericObjectPoolConfig<Connection> poolConfig) {
     this.cache = new JedisClusterInfoCache(clientConfig, clientSideCache, poolConfig, clusterNodes);
     initializeSlotsCache(clusterNodes, clientConfig);
@@ -57,7 +59,7 @@ public class ClusterConnectionProvider implements ConnectionProvider {
   }
 
   @Experimental
-  public ClusterConnectionProvider(Set<HostAndPort> clusterNodes, JedisClientConfig clientConfig, ClientSideCache clientSideCache,
+  public ClusterConnectionProvider(Set<HostAndPort> clusterNodes, JedisClientConfig clientConfig, Cache clientSideCache,
       GenericObjectPoolConfig<Connection> poolConfig, Duration topologyRefreshPeriod) {
     this.cache = new JedisClusterInfoCache(clientConfig, clientSideCache, poolConfig, clusterNodes, topologyRefreshPeriod);
     initializeSlotsCache(clusterNodes, clientConfig);
@@ -124,6 +126,11 @@ public class ClusterConnectionProvider implements ConnectionProvider {
     return slot >= 0 ? getConnectionFromSlot(slot) : getConnection();
   }
 
+  public Connection getReplicaConnection(CommandArguments args) {
+    final int slot = ((ClusterCommandArguments) args).getCommandHashSlot();
+    return slot >= 0 ? getReplicaConnectionFromSlot(slot) : getConnection();
+  }
+
   @Override
   public Connection getConnection() {
     // In antirez's redis-rb-cluster implementation, getRandomConnection always return
@@ -177,6 +184,25 @@ public class ClusterConnectionProvider implements ConnectionProvider {
         return getConnection();
       }
     }
+  }
+
+  public Connection getReplicaConnectionFromSlot(int slot) {
+    List<ConnectionPool> connectionPools = cache.getSlotReplicaPools(slot);
+    ThreadLocalRandom random = ThreadLocalRandom.current();
+    if (connectionPools != null && !connectionPools.isEmpty()) {
+      // pick up randomly a connection
+      int idx = random.nextInt(connectionPools.size());
+      return connectionPools.get(idx).getResource();
+    }
+
+    renewSlotCache();
+    connectionPools = cache.getSlotReplicaPools(slot);
+    if (connectionPools != null && !connectionPools.isEmpty()) {
+      int idx = random.nextInt(connectionPools.size());
+      return connectionPools.get(idx).getResource();
+    }
+
+    return getConnectionFromSlot(slot);
   }
 
   @Override

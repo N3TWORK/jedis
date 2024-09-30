@@ -13,6 +13,8 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Consumer;
 
 import org.apache.commons.pool2.impl.GenericObjectPoolConfig;
@@ -22,6 +24,7 @@ import org.slf4j.LoggerFactory;
 import redis.clients.jedis.*;
 import redis.clients.jedis.MultiClusterClientConfig.ClusterConfig;
 import redis.clients.jedis.annots.Experimental;
+import redis.clients.jedis.annots.VisibleForTesting;
 import redis.clients.jedis.exceptions.JedisConnectionException;
 import redis.clients.jedis.exceptions.JedisValidationException;
 import redis.clients.jedis.util.Pool;
@@ -54,6 +57,8 @@ public class MultiClusterPooledConnectionProvider implements ConnectionProvider 
      * provided at startup via the MultiClusterClientConfig. All traffic will be routed according to this index.
      */
     private volatile Integer activeMultiClusterIndex = 1;
+    
+    private final Lock activeClusterIndexLock = new ReentrantLock(true);
 
     /**
      * Indicates the final cluster/database endpoint (connection pool), according to the pre-configured list
@@ -162,8 +167,9 @@ public class MultiClusterPooledConnectionProvider implements ConnectionProvider 
 
         // Field-level synchronization is used to avoid the edge case in which
         // setActiveMultiClusterIndex(int multiClusterIndex) is called at the same time
-        synchronized (activeMultiClusterIndex) {
-
+        activeClusterIndexLock.lock();
+        
+        try {
             String originalClusterName = getClusterCircuitBreaker().getName();
 
             // Only increment if it can pass this validation otherwise we will need to check for NULL in the data path
@@ -173,7 +179,7 @@ public class MultiClusterPooledConnectionProvider implements ConnectionProvider 
 
                 throw new JedisConnectionException("Cluster/database endpoint could not failover since the MultiClusterClientConfig was not " +
                                                    "provided with an additional cluster/database endpoint according to its prioritized sequence. " +
-                                                   "If applicable, consider failing back OR restarting with an available cluster/database endpoint");
+                                                   "If applicable, consider failing back OR restarting with an available cluster/database endpoint.");
             }
             else activeMultiClusterIndex++;
 
@@ -185,6 +191,8 @@ public class MultiClusterPooledConnectionProvider implements ConnectionProvider 
                 incrementActiveMultiClusterIndex();
 
             else log.warn("Cluster/database endpoint successfully updated from '{}' to '{}'", originalClusterName, circuitBreaker.getName());
+        } finally {
+            activeClusterIndexLock.unlock();
         }
 
         return activeMultiClusterIndex;
@@ -229,11 +237,13 @@ public class MultiClusterPooledConnectionProvider implements ConnectionProvider 
      * Special care should be taken to confirm cluster/database availability AND
      * potentially cross-cluster replication BEFORE using this capability.
      */
-    public synchronized void setActiveMultiClusterIndex(int multiClusterIndex) {
+    public void setActiveMultiClusterIndex(int multiClusterIndex) {
 
         // Field-level synchronization is used to avoid the edge case in which
         // incrementActiveMultiClusterIndex() is called at the same time
-        synchronized (activeMultiClusterIndex) {
+        activeClusterIndexLock.lock();
+        
+        try {
 
             // Allows an attempt to reset the current cluster from a FORCED_OPEN to CLOSED state in the event that no failover is possible
             if (activeMultiClusterIndex == multiClusterIndex &&
@@ -256,6 +266,8 @@ public class MultiClusterPooledConnectionProvider implements ConnectionProvider 
 
             activeMultiClusterIndex = multiClusterIndex;
             lastClusterCircuitBreakerForcedOpen = false;
+        } finally {
+            activeClusterIndexLock.unlock();
         }
     }
 
@@ -286,6 +298,11 @@ public class MultiClusterPooledConnectionProvider implements ConnectionProvider 
 
     public Cluster getCluster() {
         return multiClusterMap.get(activeMultiClusterIndex);
+    }
+
+    @VisibleForTesting
+    public Cluster getCluster(int multiClusterIndex) {
+        return multiClusterMap.get(multiClusterIndex);
     }
 
     public CircuitBreaker getClusterCircuitBreaker() {

@@ -49,8 +49,8 @@
 		<jedis.module.name>redis.clients.jedis</jedis.module.name>
 		<slf4j.version>1.7.36</slf4j.version>
 		<resilience4j.version>1.7.1</resilience4j.version>
-		<jackson.version>2.17.1</jackson.version>
-		<maven.surefire.version>3.2.5</maven.surefire.version>
+		<jackson.version>2.17.2</jackson.version>
+		<maven.surefire.version>3.5.0</maven.surefire.version>
 	</properties>
 
 	<dependencies>
@@ -72,35 +72,16 @@
 		<dependency>
 			<groupId>com.google.code.gson</groupId>
 			<artifactId>gson</artifactId>
-			<version>2.10.1</version>
+			<version>2.11.0</version>
 		</dependency>
 
 		<!-- Optional dependencies -->
-		<!-- Client-side caching -->
-		<dependency>
-			<groupId>com.google.guava</groupId>
-			<artifactId>guava</artifactId>
-			<version>33.0.0-jre</version>
-			<optional>true</optional>
-		</dependency>
-		<dependency>
-			<groupId>com.github.ben-manes.caffeine</groupId>
-			<artifactId>caffeine</artifactId>
-			<version>2.9.3</version>
-			<optional>true</optional>
-		</dependency>
-		<dependency>
-			<groupId>net.openhft</groupId>
-			<artifactId>zero-allocation-hashing</artifactId>
-			<version>0.16</version>
-			<scope>test</scope>
-		</dependency>
 
 		<!-- UNIX socket connection support -->
 		<dependency>
 			<groupId>com.kohlschutter.junixsocket</groupId>
 			<artifactId>junixsocket-core</artifactId>
-			<version>2.9.1</version>
+			<version>2.10.0</version>
 			<type>pom</type>
 			<scope>test</scope>
 		</dependency>
@@ -108,7 +89,7 @@
 		<dependency>
 			<groupId>org.locationtech.jts</groupId>
 			<artifactId>jts-core</artifactId>
-			<version>1.19.0</version>
+			<version>1.20.0</version>
 			<scope>test</scope>
 		</dependency>
 
@@ -122,7 +103,7 @@
 		<dependency>
 			<groupId>org.hamcrest</groupId>
 			<artifactId>hamcrest</artifactId>
-			<version>2.2</version>
+			<version>3.0</version>
 			<scope>test</scope>
 		</dependency>
 		<dependency>
@@ -152,7 +133,13 @@
 		<dependency>
 			<groupId>net.javacrumbs.json-unit</groupId>
 			<artifactId>json-unit</artifactId>
-			<version>2.38.0</version> <!-- 3.x requires Java 17 -->
+			<version>2.40.1</version> <!-- 3.x requires Java 17 -->
+			<scope>test</scope>
+		</dependency>
+		<dependency>
+			<groupId>org.apache.httpcomponents.client5</groupId>
+			<artifactId>httpclient5-fluent</artifactId>
+			<version>5.4</version>
 			<scope>test</scope>
 		</dependency>
 
@@ -253,7 +240,7 @@
 			</plugin>
 			<plugin>
 				<artifactId>maven-javadoc-plugin</artifactId>
-				<version>3.6.3</version>
+				<version>3.10.0</version>
 				<configuration>
 					<source>8</source><!-- Until JDK 11+ -->
 					<detectJavaApiLink>false</detectJavaApiLink><!-- Until JDK 11+ -->
@@ -271,7 +258,18 @@
 			</plugin>
 			<plugin>
 				<artifactId>maven-release-plugin</artifactId>
-				<version>3.0.1</version>
+				<version>3.1.1</version>
+			</plugin>
+			<plugin>
+				<groupId>org.sonatype.plugins</groupId>
+				<artifactId>nexus-staging-maven-plugin</artifactId>
+				<version>1.7.0</version>
+				<extensions>true</extensions>
+				<configuration>
+					<serverId>ossrh</serverId>
+					<nexusUrl>https://oss.sonatype.org/</nexusUrl>
+					<autoReleaseAfterClose>true</autoReleaseAfterClose>
+				</configuration>
 			</plugin>
 			<plugin>
 				<groupId>com.googlecode.maven-java-formatter-plugin</groupId>
@@ -283,7 +281,7 @@
 			</plugin>
 			<plugin>
 				<artifactId>maven-jar-plugin</artifactId>
-				<version>3.4.1</version>
+				<version>3.4.2</version>
 				<configuration>
 					<archive>
 						<manifestFile>${project.build.outputDirectory}/META-INF/MANIFEST.MF</manifestFile>
@@ -317,7 +315,7 @@
 					<!--Sign the components - this is required by maven central for releases -->
 					<plugin>
 						<artifactId>maven-gpg-plugin</artifactId>
-						<version>3.2.4</version>
+						<version>3.2.6</version>
 						<configuration>
 							<gpgArguments>
 								<arg>--pinentry-mode</arg>

@@ -5,6 +5,8 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReentrantLock;
 
 import org.apache.commons.pool2.impl.GenericObjectPoolConfig;
 import org.slf4j.Logger;
@@ -18,7 +20,7 @@ import redis.clients.jedis.Jedis;
 import redis.clients.jedis.JedisClientConfig;
 import redis.clients.jedis.JedisPubSub;
 import redis.clients.jedis.annots.Experimental;
-import redis.clients.jedis.csc.ClientSideCache;
+import redis.clients.jedis.csc.Cache;
 import redis.clients.jedis.exceptions.JedisConnectionException;
 import redis.clients.jedis.exceptions.JedisException;
 import redis.clients.jedis.util.IOUtils;
@@ -37,7 +39,7 @@ public class SentineledConnectionProvider implements ConnectionProvider {
 
   private final JedisClientConfig masterClientConfig;
 
-  private final ClientSideCache clientSideCache;
+  private final Cache clientSideCache;
 
   private final GenericObjectPoolConfig<Connection> masterPoolConfig;
 
@@ -47,7 +49,7 @@ public class SentineledConnectionProvider implements ConnectionProvider {
 
   private final long subscribeRetryWaitTimeMillis;
 
-  private final Object initPoolLock = new Object();
+  private final Lock initPoolLock = new ReentrantLock(true);
 
   public SentineledConnectionProvider(String masterName, final JedisClientConfig masterClientConfig,
       Set<HostAndPort> sentinels, final JedisClientConfig sentinelClientConfig) {
@@ -56,7 +58,7 @@ public class SentineledConnectionProvider implements ConnectionProvider {
 
   @Experimental
   public SentineledConnectionProvider(String masterName, final JedisClientConfig masterClientConfig,
-      ClientSideCache clientSideCache, Set<HostAndPort> sentinels, final JedisClientConfig sentinelClientConfig) {
+      Cache clientSideCache, Set<HostAndPort> sentinels, final JedisClientConfig sentinelClientConfig) {
     this(masterName, masterClientConfig, clientSideCache, null, sentinels, sentinelClientConfig);
   }
 
@@ -69,7 +71,7 @@ public class SentineledConnectionProvider implements ConnectionProvider {
 
   @Experimental
   public SentineledConnectionProvider(String masterName, final JedisClientConfig masterClientConfig,
-      ClientSideCache clientSideCache, final GenericObjectPoolConfig<Connection> poolConfig,
+      Cache clientSideCache, final GenericObjectPoolConfig<Connection> poolConfig,
       Set<HostAndPort> sentinels, final JedisClientConfig sentinelClientConfig) {
     this(masterName, masterClientConfig, clientSideCache, poolConfig, sentinels, sentinelClientConfig,
         DEFAULT_SUBSCRIBE_RETRY_WAIT_TIME_MILLIS);
@@ -84,7 +86,7 @@ public class SentineledConnectionProvider implements ConnectionProvider {
 
   @Experimental
   public SentineledConnectionProvider(String masterName, final JedisClientConfig masterClientConfig,
-      ClientSideCache clientSideCache, final GenericObjectPoolConfig<Connection> poolConfig,
+      Cache clientSideCache, final GenericObjectPoolConfig<Connection> poolConfig,
       Set<HostAndPort> sentinels, final JedisClientConfig sentinelClientConfig,
       final long subscribeRetryWaitTimeMillis) {
 
@@ -122,7 +124,9 @@ public class SentineledConnectionProvider implements ConnectionProvider {
   }
 
   private void initMaster(HostAndPort master) {
-    synchronized (initPoolLock) {
+    initPoolLock.lock();
+
+    try {
       if (!master.equals(currentMaster)) {
         currentMaster = master;
 
@@ -132,7 +136,7 @@ public class SentineledConnectionProvider implements ConnectionProvider {
         pool = newPool;
         LOG.info("Created connection pool to master at {}.", master);
         if (clientSideCache != null) {
-          clientSideCache.clear();
+          clientSideCache.flush();
         }
 
         if (existingPool != null) {
@@ -142,6 +146,8 @@ public class SentineledConnectionProvider implements ConnectionProvider {
           existingPool.close();
         }
       }
+    } finally {
+      initPoolLock.unlock();
     }
   }
 
@@ -277,8 +283,8 @@ public class SentineledConnectionProvider implements ConnectionProvider {
                   initMaster(toHostAndPort(switchMasterMsg[3], switchMasterMsg[4]));
                 } else {
                   LOG.debug(
-                    "Ignoring message on +switch-master for master {}. Our master is {}.",
-                    switchMasterMsg[0], masterName);
+                      "Ignoring message on +switch-master for master {}. Our master is {}.",
+                      switchMasterMsg[0], masterName);
                 }
 
               } else {

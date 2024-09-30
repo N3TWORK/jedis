@@ -79,6 +79,13 @@ public class ClusterPipeline extends MultiNodePipelineBase {
     return cco;
   }
 
+  /**
+   * This method must be called after constructor, if graph commands are going to be used.
+   */
+  public void prepareGraphCommands() {
+    super.prepareGraphCommands(provider);
+  }
+
   @Override
   protected void handleExceptionOnSync(MultiNodePipelineCommand pipelineCommand,
                                           Connection connection,
@@ -169,10 +176,11 @@ public class ClusterPipeline extends MultiNodePipelineBase {
     }
   }
 
-  /**
-   * This method must be called after constructor, if graph commands are going to be used.
-   */
-  public void prepareGraphCommands() {
-    super.prepareGraphCommands(provider);
+  public Response<Long> spublish(String channel, String message) {
+    return appendCommand(commandObjects.spublish(channel, message));
+  }
+
+  public Response<Long> spublish(byte[] channel, byte[] message) {
+    return appendCommand(commandObjects.spublish(channel, message));
   }
 }
