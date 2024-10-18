@@ -135,6 +135,7 @@ public class CommandArguments implements Iterable<Rawable> {
     }
 
     addKeyInKeys(key);
+
     return this;
   }
 
