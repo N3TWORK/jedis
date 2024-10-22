@@ -9,7 +9,7 @@
 	<packaging>jar</packaging>
 	<groupId>redis.clients</groupId>
 	<artifactId>jedis</artifactId>
-	<version>5.3.0.N3T.1-SNAPSHOT</version>
+	<version>5.3.0.N3T.1</version>
 	<name>Jedis</name>
 	<description>Jedis is a blazingly small and sane Redis java client.</description>
 	<url>https://github.com/redis/jedis</url>
@@ -266,17 +266,6 @@
 			<plugin>
 				<artifactId>maven-release-plugin</artifactId>
 				<version>3.1.1</version>
-			</plugin>
-			<plugin>
-				<groupId>org.sonatype.plugins</groupId>
-				<artifactId>nexus-staging-maven-plugin</artifactId>
-				<version>1.7.0</version>
-				<extensions>true</extensions>
-				<configuration>
-					<serverId>ossrh</serverId>
-					<nexusUrl>https://oss.sonatype.org/</nexusUrl>
-					<autoReleaseAfterClose>true</autoReleaseAfterClose>
-				</configuration>
 			</plugin>
 			<plugin>
 				<groupId>com.googlecode.maven-java-formatter-plugin</groupId>
